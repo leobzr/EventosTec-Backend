@@ -44,7 +44,9 @@ public class EventController {
     }
 
     @GetMapping
-    public ResponseEntity<List<EventResponseDTO>> getEvents(@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int size){
+    public ResponseEntity<List<EventResponseDTO>> getEvents(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
         List<EventResponseDTO> allEvents = this.eventService.getUpcomingEvents(page, size);
         return ResponseEntity.ok(allEvents);
     }
@@ -64,5 +66,11 @@ public class EventController {
     public ResponseEntity<List<EventResponseDTO>> getSearchEvents(@RequestParam String title) {
         List<EventResponseDTO> events = eventService.searchEvents(title);
         return ResponseEntity.ok(events);
+    }
+
+    @DeleteMapping("/{eventId}")
+    public ResponseEntity<Void> deleteEvent(@PathVariable UUID eventId, @RequestBody String adminKey) {
+        eventService.deleteEvent(eventId, adminKey);
+        return ResponseEntity.noContent().build();
     }
 }

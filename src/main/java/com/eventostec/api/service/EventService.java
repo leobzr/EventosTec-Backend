@@ -1,6 +1,5 @@
 package com.eventostec.api.service;
 
-import com.amazonaws.services.s3.AmazonS3;
 import com.eventostec.api.domain.address.Address;
 import com.eventostec.api.domain.coupon.Coupon;
 import com.eventostec.api.domain.event.*;
@@ -12,10 +11,12 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetUrlRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -25,8 +26,11 @@ public class EventService {
     @Value("${aws.bucket.name}")
     private String bucketName;
 
+    @Value("${admin.key}")
+    private String adminKey;
+
     @Autowired
-    private AmazonS3 s3Client;
+    private S3Client s3Client;
 
     @Autowired
     private AddressService addressService;
@@ -37,10 +41,10 @@ public class EventService {
     @Autowired
     private EventRepository repository;
 
-    public Event createEvent(EventRequestDTO data){
+    public Event createEvent(EventRequestDTO data) {
         String imgUrl = null;
 
-        if(data.image() != null){
+        if (data.image() != null) {
             imgUrl = this.uploadImg(data.image());
         }
 
@@ -54,16 +58,23 @@ public class EventService {
 
         repository.save(newEvent);
 
-        if(!data.remote()) {
+        if (!data.remote()) {
             this.addressService.createAddress(data, newEvent);
         }
 
         return newEvent;
     }
 
-    public List<EventResponseDTO> getUpcomingEvents(int page, int size){
+    public List<EventResponseDTO> getUpcomingEvents(int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<EventAddressProjection> eventsPage = this.repository.findUpcomingEvents(new Date(), pageable);
+
+        // Debugging logs
+        System.out.println("Page: " + page);
+        System.out.println("Size: " + size);
+        System.out.println("Number of events fetched: " + eventsPage.getNumberOfElements());
+
+
         return eventsPage.map(event -> new EventResponseDTO(
                         event.getId(),
                         event.getTitle(),
@@ -103,6 +114,17 @@ public class EventService {
                 event.getImgUrl(),
                 event.getEventUrl(),
                 couponDTOs);
+    }
+
+    public Void deleteEvent(UUID eventId, String adminKey){
+        if(adminKey == null || !adminKey.equals(this.adminKey)){
+            throw new IllegalArgumentException("Invalid admin key");
+        }
+
+        this.repository.delete(this.repository.findById(eventId)
+                .orElseThrow(() -> new IllegalArgumentException("Event not found")));
+
+        return null;
     }
 
     public List<EventResponseDTO> searchEvents(String title){
@@ -146,26 +168,27 @@ public class EventService {
                 .stream().toList();
     }
 
-    private String uploadImg(MultipartFile multipartFile){
+    private String uploadImg(MultipartFile multipartFile) {
         String filename = UUID.randomUUID() + "-" + multipartFile.getOriginalFilename();
 
-        try{
-            File file = this.convertMultipartToFile(multipartFile);
-            s3Client.putObject(bucketName, filename, file);
-            file.delete();
-            return s3Client.getUrl(bucketName, filename).toString();
-        } catch (Exception e){
+        try {
+            PutObjectRequest putOb = PutObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(filename)
+                    .contentType(multipartFile.getContentType())  // Set the content type
+                    .build();
+            s3Client.putObject(putOb, RequestBody.fromByteBuffer(ByteBuffer.wrap(multipartFile.getBytes())));
+            GetUrlRequest request = GetUrlRequest.builder()
+                    .bucket(bucketName)
+                    .key(filename)
+                    .build();
+
+            return s3Client.utilities().getUrl(request).toString();
+        } catch (Exception e) {
             System.out.println("erro ao subir arquivo");
             System.out.println(e.getMessage());
             return "";
         }
     }
 
-    private File convertMultipartToFile(MultipartFile multipartFile) throws IOException {
-        File convFile = new File(Objects.requireNonNull(multipartFile.getOriginalFilename()));
-        FileOutputStream fos = new FileOutputStream(convFile);
-        fos.write(multipartFile.getBytes());
-        fos.close();
-        return convFile;
-    }
 }
